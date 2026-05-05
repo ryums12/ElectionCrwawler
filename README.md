@@ -1,2 +1,7 @@
-# PoliticCrwawler
-No comment
+# ElectionCrwawler
+
+1. 크롤링으로 뉴스 목록 리스트 저장
+
+2. 중복 제거 전처리 후 저장 
+
+3. 내용 요약 및 지역/정당/인물 등등의 셀렉션
