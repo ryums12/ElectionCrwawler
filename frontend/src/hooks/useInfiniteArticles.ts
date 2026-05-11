@@ -9,7 +9,7 @@ type UseInfiniteArticlesParams = Pick<ArticleSearchParams, "query" | "parties" |
 
 export const useInfiniteArticles = ({ query, parties, regions, people }: UseInfiniteArticlesParams) => {
   const [articles, setArticles] = useState<Article[]>([]);
-  const [page, setPage] = useState(1);
+  const [nextOffset, setNextOffset] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -28,7 +28,7 @@ export const useInfiniteArticles = ({ query, parties, regions, people }: UseInfi
   );
 
   const loadPage = useCallback(
-    async (nextPage: number, shouldReset = false) => {
+    async (offset: number, shouldReset = false) => {
       if ((isLoadingRef.current && !shouldReset) || (!hasMoreRef.current && !shouldReset)) {
         return;
       }
@@ -42,7 +42,7 @@ export const useInfiniteArticles = ({ query, parties, regions, people }: UseInfi
       try {
         const result = await fetchArticles({
           ...params,
-          page: nextPage,
+          offset,
           limit: PAGE_SIZE,
         });
 
@@ -50,8 +50,8 @@ export const useInfiniteArticles = ({ query, parties, regions, people }: UseInfi
           return;
         }
 
-        setArticles((currentArticles) => (shouldReset ? result.articles : [...currentArticles, ...result.articles]));
-        setPage(nextPage);
+        setArticles((currentArticles) => (shouldReset ? result.items : [...currentArticles, ...result.items]));
+        setNextOffset(result.nextOffset);
         setHasMore(result.hasMore);
         hasMoreRef.current = result.hasMore;
       } catch (unknownError) {
@@ -70,15 +70,15 @@ export const useInfiniteArticles = ({ query, parties, regions, people }: UseInfi
 
   useEffect(() => {
     setArticles([]);
-    setPage(1);
+    setNextOffset(0);
     setHasMore(true);
     hasMoreRef.current = true;
-    void loadPage(1, true);
+    void loadPage(0, true);
   }, [loadPage]);
 
   const loadMore = useCallback(() => {
-    void loadPage(page + 1);
-  }, [loadPage, page]);
+    void loadPage(nextOffset);
+  }, [loadPage, nextOffset]);
 
   return {
     articles,

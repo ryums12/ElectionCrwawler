@@ -19,9 +19,9 @@ const addUnique = (values: string[], nextValue: string) =>
 export function ElectionNewsPage() {
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<SelectedFilters>({
-    parties: ["Democratic Party", "People Power Party"],
-    regions: ["Seoul", "Busan"],
-    people: ["Hong Gil-dong"],
+    parties: [],
+    regions: [],
+    people: [],
   });
 
   const { articles, isLoading, hasMore, error, loadMore } = useInfiniteArticles({

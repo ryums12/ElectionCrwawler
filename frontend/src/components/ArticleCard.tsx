@@ -14,11 +14,14 @@ const filterGroups: { type: FilterType; label: string }[] = [
 ];
 
 export function ArticleCard({ article, onAddFilter }: ArticleCardProps) {
+  const href = article.originalUrl || article.naverUrl || "#";
+  const body = article.summary || article.description;
+
   return (
     <article className="rounded-lg border border-line bg-panel/80 p-5 shadow-glow backdrop-blur">
       <h2 className="text-lg font-semibold leading-snug text-slate-50 sm:text-xl">
         <a
-          href={article.originalUrl}
+          href={href}
           target="_blank"
           rel="noopener noreferrer"
           className="outline-none transition hover:text-violet-300 focus:text-violet-300"
@@ -27,7 +30,12 @@ export function ArticleCard({ article, onAddFilter }: ArticleCardProps) {
         </a>
       </h2>
 
-      <p className="line-clamp-3 mt-3 text-sm leading-6 text-slate-300 sm:text-base">{article.summary}</p>
+      {body ? <p className="line-clamp-3 mt-3 text-sm leading-6 text-slate-300 sm:text-base">{body}</p> : null}
+
+      <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
+        {article.sourceName ? <span>{article.sourceName}</span> : null}
+        {article.publishedAt ? <time dateTime={article.publishedAt}>{formatDate(article.publishedAt)}</time> : null}
+      </div>
 
       <div className="mt-4 flex flex-wrap gap-2">
         {filterGroups.flatMap(({ type, label }) =>
@@ -47,3 +55,9 @@ export function ArticleCard({ article, onAddFilter }: ArticleCardProps) {
     </article>
   );
 }
+
+const formatDate = (value: string) =>
+  new Intl.DateTimeFormat("ko-KR", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
