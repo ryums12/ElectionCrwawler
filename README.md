@@ -2,9 +2,9 @@
 
 Hourly Naver News Search ingestion for local election coverage.
 
-The current pipeline only fetches and stores articles. Summarization, tagging,
-clustering, richer duplicate detection, and UI work are intentionally left for
-later components.
+The pipeline fetches Naver News Search API results, stores representative
+articles, groups substantially identical items into clusters, and records fetch
+logs plus crawl checkpoints for hourly updates.
 
 ## What It Fetches
 
@@ -85,26 +85,28 @@ See `.env.example` for the full list.
 
 ## Schema Notes
 
-The starter schema is kept, with small additions:
+The schema stores only representative service-visible articles in `articles`.
+Duplicate API items are counted on `news_clusters` and optionally recorded in
+`news_duplicate_logs` for tuning.
 
-- `search_keyword`: records which configured keyword produced the article.
-- `original_url_hash` and `canonical_url_hash`: make exact URL storage idempotent without relying on indexing `TEXT` columns.
-- Indexes on timestamps, hashes, cluster IDs, and duplicate pointers.
-- Foreign keys for future cluster and duplicate relationships.
+- `articles`: raw and cleaned titles/descriptions, original and Naver URLs, generated external IDs, normalized comparison fields, hashes, raw payloads, summary/keyword fields, and cluster links.
+- `news_clusters`: representative article metadata, normalized comparison fields, first/last publication times, `article_count`, and `duplicate_count`.
+- `news_api_fetch_logs`: per API page bookkeeping, including inserted and duplicate counts.
+- `news_crawl_state`: latest-first checkpoint per `api_source` and `search_keyword`.
 
-Exact same canonical URLs are skipped by the repository. This is not the future
-article duplicate detection system; it only prevents the hourly API job from
-inserting the same API result repeatedly.
+For existing databases created from the starter migration, apply
+`migrations/002_expand_news_api_storage.sql`.
 
 ## Hourly Flow
 
 1. `main.py` loads `.env` configuration.
 2. `HourlyScheduler` starts a run immediately and then sleeps for the configured interval.
-3. `NaverNewsClient` fetches date-sorted news results for each keyword.
-4. `ArticleNormalizer` removes Naver highlight tags, decodes HTML entities, parses `pubDate`, and computes normalized fields.
-5. Hashes are generated for URLs, title, and snippet content.
-6. `DuplicateChecker.mark_duplicate()` is called as a clearly separated placeholder for future duplicate detection.
-7. `ArticleRepository` inserts the article. Existing canonical URLs are skipped.
+3. `NaverNewsClient` fetches date-sorted news result pages for each keyword.
+4. `ArticleNormalizer` stores raw API text, removes HTML tags, decodes entities, normalizes URLs/text, parses RFC-822 dates, and generates external article IDs.
+5. Exact duplicate checks use `api_source + external_article_id`, canonical URL hash, and content hash.
+6. `DuplicateChecker` compares candidate clusters using local title/description token similarity, keyword overlap, and publication time.
+7. New articles are inserted and assigned a new cluster; duplicate items update cluster counts and duplicate logs.
+8. `news_crawl_state` is updated with the first item seen in the successful run so later pages can stop at the previous checkpoint.
 
 ## Project Structure
 
@@ -114,8 +116,8 @@ src/news_ingestion/
   naver_client.py       # Naver News Search API client
   normalizer.py         # title/body cleanup and date parsing
   hash_generator.py     # SHA-256 helpers
-  duplicate_checker.py  # future duplicate detection hook
-  repository.py         # database writes
+  duplicate_checker.py  # exact and cluster-level duplicate decisions
+  repository.py         # database reads/writes for articles, clusters, logs, state
   ingestion_service.py  # application workflow
   scheduler.py          # hourly runner
   main.py               # CLI entry point

@@ -7,7 +7,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from .config import NaverConfig
-from .models import NaverNewsItem
+from .models import NaverNewsItem, NaverNewsResponse
 
 
 class NaverApiError(RuntimeError):
@@ -22,20 +22,35 @@ class NaverNewsClient:
         self._timeout_seconds = timeout_seconds
 
     def search(self, query: str) -> Iterable[NaverNewsItem]:
+        for payload in self.search_pages(query):
+            for item in payload.items:
+                yield item
+
+    def search_pages(self, query: str) -> Iterable[NaverNewsResponse]:
         for page in range(self._config.max_pages):
             start = page * self._config.display + 1
             if start > 1000:
                 break
             payload = self._request(query=query, start=start)
             items = payload.get("items", [])
-            for item in items:
-                yield NaverNewsItem(
-                    title=item.get("title", ""),
-                    originallink=item.get("originallink", ""),
-                    link=item.get("link", ""),
-                    description=item.get("description", ""),
-                    pubDate=item.get("pubDate", ""),
-                )
+            yield NaverNewsResponse(
+                lastBuildDate=payload.get("lastBuildDate", ""),
+                total=int(payload.get("total", 0) or 0),
+                start=int(payload.get("start", start) or start),
+                display=int(payload.get("display", self._config.display) or self._config.display),
+                items=tuple(
+                    NaverNewsItem(
+                        title=item.get("title", ""),
+                        originallink=item.get("originallink", ""),
+                        link=item.get("link", ""),
+                        description=item.get("description", ""),
+                        pubDate=item.get("pubDate", ""),
+                        raw_payload=item,
+                    )
+                    for item in items
+                ),
+                raw_payload=payload,
+            )
 
             if len(items) < self._config.display:
                 break
