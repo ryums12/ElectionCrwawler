@@ -82,6 +82,11 @@ See `.env.example` for the full list.
 - `NAVER_DISPLAY`: number of results per request, from `1` to `100`
 - `NAVER_MAX_PAGES`: pages per keyword per run
 - `INGESTION_INTERVAL_SECONDS`: scheduler interval, default `3600`
+- `OPENAI_API_KEY`: optional OpenAI API key for ingestion-time summaries and metadata extraction
+- `OPENAI_MODEL`: enrichment model, default `gpt-4.1-mini`
+- `OPENAI_REQUEST_TIMEOUT_SECONDS`: OpenAI request timeout, default `30`
+- `ARTICLE_FETCH_TIMEOUT_SECONDS`: original article fetch timeout, default `10`
+- `ENRICHMENT_MAX_ARTICLE_CHARS`: maximum article text sent for enrichment, default `12000`
 
 ## Schema Notes
 
@@ -95,7 +100,8 @@ Duplicate API items are counted on `news_clusters` and optionally recorded in
 - `news_crawl_state`: latest-first checkpoint per `api_source` and `search_keyword`.
 
 For existing databases created from the starter migration, apply
-`migrations/002_expand_news_api_storage.sql`.
+`migrations/002_expand_news_api_storage.sql`, then
+`migrations/003_enrichment_json_columns.sql`.
 
 ## Hourly Flow
 
@@ -105,8 +111,9 @@ For existing databases created from the starter migration, apply
 4. `ArticleNormalizer` stores raw API text, removes HTML tags, decodes entities, normalizes URLs/text, parses RFC-822 dates, and generates external article IDs.
 5. Exact duplicate checks use `api_source + external_article_id`, canonical URL hash, and content hash.
 6. `DuplicateChecker` compares candidate clusters using local title/description token similarity, keyword overlap, and publication time.
-7. New articles are inserted and assigned a new cluster; duplicate items update cluster counts and duplicate logs.
-8. `news_crawl_state` is updated with the first item seen in the successful run so later pages can stop at the previous checkpoint.
+7. New representative articles are enriched during ingestion when `OPENAI_API_KEY` is present. The enricher tries to fetch the original article body first, falls back to the API title/description, asks for strict JSON only, and stores `summary`, `main_keywords`, `parties`, `people`, and `regions` before saving.
+8. Duplicate items update cluster counts and duplicate logs. If the matched cluster already has summary/metadata, the LLM call is skipped; if it is missing metadata, ingestion attempts a best-effort backfill without blocking article persistence.
+9. `news_crawl_state` is updated with the first item seen in the successful run so later pages can stop at the previous checkpoint.
 
 ## Project Structure
 
@@ -117,6 +124,7 @@ src/news_ingestion/
   normalizer.py         # title/body cleanup and date parsing
   hash_generator.py     # SHA-256 helpers
   duplicate_checker.py  # exact and cluster-level duplicate decisions
+  enricher.py           # original article fetch, OpenAI summary, metadata JSON parsing
   repository.py         # database reads/writes for articles, clusters, logs, state
   ingestion_service.py  # application workflow
   scheduler.py          # hourly runner

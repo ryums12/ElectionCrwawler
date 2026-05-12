@@ -189,6 +189,7 @@ class ArticleRepository:
             SELECT
                 id,
                 representative_article_id,
+                cluster_summary,
                 normalized_title,
                 normalized_description,
                 title_hash,
@@ -387,6 +388,47 @@ class ArticleRepository:
                     ),
                 )
 
+    def cluster_has_enrichment(self, cluster_id: int) -> bool:
+        sql = """
+            SELECT cluster_summary, main_keywords, parties, regions, people
+            FROM news_clusters
+            WHERE id = %s
+            LIMIT 1
+        """
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (cluster_id,))
+                row = cursor.fetchone()
+                if not row:
+                    return False
+                return _has_enrichment(row)
+
+    def update_cluster_enrichment(self, cluster_id: int, article: Article) -> None:
+        sql = """
+            UPDATE news_clusters
+            SET cluster_summary = COALESCE(cluster_summary, %s),
+                main_keywords = COALESCE(main_keywords, %s),
+                parties = COALESCE(parties, %s),
+                regions = COALESCE(regions, %s),
+                people = COALESCE(people, %s),
+                updated_at = %s
+            WHERE id = %s
+        """
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    sql,
+                    (
+                        article.summary,
+                        article.main_keywords,
+                        article.parties,
+                        article.regions,
+                        article.people,
+                        _utc_now(),
+                        cluster_id,
+                    ),
+                )
+
     def save_duplicate_log(
         self,
         article: Article,
@@ -435,6 +477,7 @@ def _candidate_cluster_from_row(row: dict) -> CandidateCluster:
     return CandidateCluster(
         id=int(row["id"]),
         representative_article_id=row["representative_article_id"],
+        cluster_summary=row.get("cluster_summary"),
         normalized_title=row.get("normalized_title") or "",
         normalized_description=row.get("normalized_description") or "",
         title_hash=row.get("title_hash"),
@@ -454,3 +497,13 @@ def _utc_now() -> datetime:
 
 def _is_integrity_error(exc: Exception) -> bool:
     return exc.__class__.__name__ == "IntegrityError"
+
+
+def _has_enrichment(row: dict) -> bool:
+    return bool(
+        row.get("cluster_summary")
+        and row.get("main_keywords")
+        and row.get("parties") is not None
+        and row.get("regions") is not None
+        and row.get("people") is not None
+    )

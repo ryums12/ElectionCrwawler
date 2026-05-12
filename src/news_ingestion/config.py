@@ -26,9 +26,19 @@ class NaverConfig:
 
 
 @dataclass(frozen=True)
+class EnrichmentConfig:
+    openai_api_key: str | None
+    openai_model: str = "gpt-4.1-mini"
+    request_timeout_seconds: int = 30
+    article_fetch_timeout_seconds: int = 10
+    max_article_chars: int = 12000
+
+
+@dataclass(frozen=True)
 class AppConfig:
     database: DatabaseConfig
     naver: NaverConfig
+    enrichment: EnrichmentConfig
     search_keywords: tuple[str, ...]
     ingestion_interval_seconds: int = 3600
 
@@ -62,6 +72,13 @@ def load_config() -> AppConfig:
             client_secret=client_secret,
             display=display,
             max_pages=max_pages,
+        ),
+        enrichment=EnrichmentConfig(
+            openai_api_key=os.getenv("OPENAI_API_KEY") or None,
+            openai_model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
+            request_timeout_seconds=_int("OPENAI_REQUEST_TIMEOUT_SECONDS", 30),
+            article_fetch_timeout_seconds=_int("ARTICLE_FETCH_TIMEOUT_SECONDS", 10),
+            max_article_chars=_int("ENRICHMENT_MAX_ARTICLE_CHARS", 12000),
         ),
         search_keywords=keywords,
         ingestion_interval_seconds=_int("INGESTION_INTERVAL_SECONDS", 3600),

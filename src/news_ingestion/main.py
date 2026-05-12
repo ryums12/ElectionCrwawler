@@ -5,6 +5,7 @@ import logging
 
 from .config import load_config
 from .duplicate_checker import DuplicateChecker
+from .enricher import ArticleEnricher
 from .ingestion_service import NewsIngestionService
 from .naver_client import NaverNewsClient
 from .normalizer import ArticleNormalizer
@@ -19,6 +20,7 @@ def build_service() -> tuple[NewsIngestionService, tuple[str, ...], int]:
         normalizer=ArticleNormalizer(),
         duplicate_checker=DuplicateChecker(),
         repository=ArticleRepository(config.database),
+        enricher=ArticleEnricher(config.enrichment),
     )
     return service, config.search_keywords, config.ingestion_interval_seconds
 

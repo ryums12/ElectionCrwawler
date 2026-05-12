@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
 import unittest
 from datetime import datetime
 
+from src.news_ingestion.config import EnrichmentConfig
 from src.news_ingestion.duplicate_checker import DuplicateChecker
+from src.news_ingestion.enricher import ArticleEnricher, parse_enrichment_json
 from src.news_ingestion.ingestion_service import NewsIngestionService
 from src.news_ingestion.models import (
     CandidateCluster,
@@ -62,6 +65,7 @@ class DuplicateCheckerTests(unittest.TestCase):
                 CandidateCluster(
                     id=15,
                     representative_article_id=7,
+                    cluster_summary=None,
                     normalized_title="충주맨 김선태 6 3 지방선거 개표방송 출연 지역 소멸 논의",
                     normalized_description="김선태가 지방선거 개표방송에 출연해 지역 소멸 문제를 논의한다",
                     title_hash=None,
@@ -91,6 +95,7 @@ class DuplicateCheckerTests(unittest.TestCase):
                 CandidateCluster(
                     id=15,
                     representative_article_id=7,
+                    cluster_summary=None,
                     normalized_title="충주맨 김선태 개표방송 출연 지역 소멸 논의",
                     normalized_description="김선태가 지방선거 개표방송에 출연한다",
                     title_hash=None,
@@ -108,6 +113,55 @@ class DuplicateCheckerTests(unittest.TestCase):
         result = DuplicateChecker().find_duplicate_cluster(article, repository)
 
         self.assertFalse(result.is_duplicate)
+
+
+class EnricherTests(unittest.TestCase):
+    def test_missing_openai_api_key_leaves_article_unchanged(self) -> None:
+        article = _article("Title", "Description")
+        enricher = ArticleEnricher(_enrichment_config(api_key=None))
+
+        self.assertEqual(enricher.enrich(article), article)
+
+    def test_original_article_fetch_failure_falls_back_to_api_text(self) -> None:
+        article = _article("Title", "Description")
+        client = FakeOpenAIClient(
+            {
+                "summary": "요약",
+                "main_keywords": ["공약"],
+                "parties": [],
+                "people": [],
+                "regions": [],
+            }
+        )
+        enricher = ArticleEnricher(
+            _enrichment_config(),
+            body_fetcher=lambda _url: (_ for _ in ()).throw(RuntimeError("blocked")),
+            llm_client=client,
+        )
+
+        enriched = enricher.enrich(article)
+
+        self.assertEqual(enriched.summary, "요약")
+        self.assertEqual(json.loads(enriched.main_keywords), ["공약"])
+        self.assertEqual(client.call_count, 1)
+
+    def test_parse_enrichment_json_supports_multiple_entities(self) -> None:
+        result = parse_enrichment_json(
+            json.dumps(
+                {
+                    "summary": "요약",
+                    "main_keywords": ["선거", "공약"],
+                    "parties": ["A당", "B당"],
+                    "people": ["홍길동", "김철수"],
+                    "regions": ["서울", "부산"],
+                },
+                ensure_ascii=False,
+            )
+        )
+
+        self.assertEqual(result.parties, ["A당", "B당"])
+        self.assertEqual(result.people, ["홍길동", "김철수"])
+        self.assertEqual(result.regions, ["서울", "부산"])
 
 
 class IngestionServiceTests(unittest.TestCase):
@@ -148,6 +202,7 @@ class IngestionServiceTests(unittest.TestCase):
                 CandidateCluster(
                     id=20,
                     representative_article_id=3,
+                    cluster_summary=None,
                     normalized_title=article.normalized_title,
                     normalized_description=article.normalized_description,
                     title_hash=article.title_hash,
@@ -191,6 +246,61 @@ class IngestionServiceTests(unittest.TestCase):
 
         self.assertEqual(repository.crawl_state_article.external_article_id, "NAVER_009_0005677919")
 
+    def test_new_article_is_saved_with_enrichment_arrays(self) -> None:
+        item = _item("Title", "Description", article_no="0005677921", original_url="https://example.com/h")
+        repository = FakeRepository()
+        service = _service(
+            [_response([item])],
+            repository,
+            enricher=StaticEnricher(
+                summary="요약",
+                main_keywords=["선거", "공약"],
+                parties=["A당", "B당"],
+                people=["홍길동", "김철수"],
+                regions=["서울", "부산"],
+            ),
+        )
+
+        stats = service.ingest_keywords(("keyword",))
+
+        self.assertEqual(stats.inserted, 1)
+        saved = repository.saved_articles[0]
+        self.assertEqual(saved.summary, "요약")
+        self.assertEqual(json.loads(saved.parties), ["A당", "B당"])
+        self.assertEqual(json.loads(saved.people), ["홍길동", "김철수"])
+        self.assertEqual(json.loads(saved.regions), ["서울", "부산"])
+
+    def test_summarized_duplicate_cluster_skips_enrichment_call(self) -> None:
+        item = _item("Title", "Description", article_no="0005677922", original_url="https://example.com/i")
+        article = ArticleNormalizer().from_naver_item(item, "keyword")
+        repository = FakeRepository(
+            candidate_clusters=[
+                CandidateCluster(
+                    id=30,
+                    representative_article_id=4,
+                    cluster_summary="이미 요약됨",
+                    normalized_title=article.normalized_title,
+                    normalized_description=article.normalized_description,
+                    title_hash=article.title_hash,
+                    content_hash=None,
+                    main_keywords='["선거"]',
+                    parties="[]",
+                    regions="[]",
+                    people="[]",
+                    first_published_at=article.published_at,
+                    last_published_at=article.published_at,
+                )
+            ],
+            cluster_enriched=True,
+        )
+        enricher = CountingEnricher()
+        service = _service([_response([item])], repository, enricher=enricher)
+
+        stats = service.ingest_keywords(("keyword",))
+
+        self.assertEqual(stats.skipped_existing, 1)
+        self.assertEqual(enricher.call_count, 0)
+
 
 class FakeClient:
     def __init__(self, responses: list[NaverNewsResponse]) -> None:
@@ -200,6 +310,71 @@ class FakeClient:
         yield from self._responses
 
 
+class FakeOpenAIClient:
+    def __init__(self, payload: dict) -> None:
+        self.payload = payload
+        self.call_count = 0
+        self.chat = self
+        self.completions = self
+
+    def create(self, **_kwargs):
+        self.call_count += 1
+        content = json.dumps(self.payload, ensure_ascii=False)
+        return _OpenAIResponse(content)
+
+
+class _OpenAIResponse:
+    def __init__(self, content: str) -> None:
+        self.choices = [_OpenAIChoice(content)]
+
+
+class _OpenAIChoice:
+    def __init__(self, content: str) -> None:
+        self.message = _OpenAIMessage(content)
+
+
+class _OpenAIMessage:
+    def __init__(self, content: str) -> None:
+        self.content = content
+
+
+class StaticEnricher:
+    def __init__(
+        self,
+        summary: str,
+        main_keywords: list[str],
+        parties: list[str],
+        people: list[str],
+        regions: list[str],
+    ) -> None:
+        self.summary = summary
+        self.main_keywords = main_keywords
+        self.parties = parties
+        self.people = people
+        self.regions = regions
+
+    def enrich(self, article):
+        from dataclasses import replace
+
+        return replace(
+            article,
+            summary=self.summary,
+            main_keywords=json.dumps(self.main_keywords, ensure_ascii=False),
+            parties=json.dumps(self.parties, ensure_ascii=False),
+            people=json.dumps(self.people, ensure_ascii=False),
+            regions=json.dumps(self.regions, ensure_ascii=False),
+        )
+
+
+class CountingEnricher:
+    def __init__(self) -> None:
+        self.call_count = 0
+
+    def enrich(self, article):
+        self.call_count += 1
+        return article
+
+
 class FakeRepository:
     def __init__(
         self,
@@ -207,14 +382,17 @@ class FakeRepository:
         existing_by_canonical: dict[str | None, ExistingArticle] | None = None,
         existing_by_content: dict[str | None, ExistingArticle] | None = None,
         candidate_clusters: list[CandidateCluster] | None = None,
+        cluster_enriched: bool = False,
     ) -> None:
         self.previous_checkpoint_id = previous_checkpoint_id
         self.existing_by_canonical = existing_by_canonical or {}
         self.existing_by_content = existing_by_content or {}
         self.candidate_clusters = candidate_clusters or []
+        self.cluster_enriched = cluster_enriched
         self.incremented_clusters: list[int] = []
         self.saved_articles = []
         self.duplicate_logs = []
+        self.cluster_enrichment_updates = []
         self.crawl_state_article = None
         self.fetch_log_id = 0
 
@@ -242,6 +420,12 @@ class FakeRepository:
     def increment_cluster_duplicate_count(self, cluster_id: int, _published_at) -> None:
         self.incremented_clusters.append(cluster_id)
 
+    def cluster_has_enrichment(self, _cluster_id: int) -> bool:
+        return self.cluster_enriched
+
+    def update_cluster_enrichment(self, cluster_id: int, article) -> None:
+        self.cluster_enrichment_updates.append((cluster_id, article))
+
     def save_duplicate_log(self, article, result) -> None:
         self.duplicate_logs.append((article, result))
 
@@ -256,12 +440,27 @@ class FakeRepository:
         return None
 
 
-def _service(responses: list[NaverNewsResponse], repository: FakeRepository) -> NewsIngestionService:
+def _service(
+    responses: list[NaverNewsResponse],
+    repository: FakeRepository,
+    enricher=None,
+) -> NewsIngestionService:
     return NewsIngestionService(
         client=FakeClient(responses),
         normalizer=ArticleNormalizer(),
         duplicate_checker=DuplicateChecker(),
         repository=repository,
+        enricher=enricher,
+    )
+
+
+def _enrichment_config(api_key: str | None = "test-key") -> EnrichmentConfig:
+    return EnrichmentConfig(
+        openai_api_key=api_key,
+        openai_model="test-model",
+        request_timeout_seconds=1,
+        article_fetch_timeout_seconds=1,
+        max_article_chars=2000,
     )
 
 

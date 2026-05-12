@@ -64,6 +64,7 @@ class ExistingArticle:
 class CandidateCluster:
     id: int
     representative_article_id: int | None
+    cluster_summary: str | None
     normalized_title: str
     normalized_description: str
     title_hash: str | None

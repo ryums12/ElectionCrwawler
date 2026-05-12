@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass
 
 from .duplicate_checker import DuplicateChecker
+from .enricher import ArticleEnricher
 from .models import Article, ProcessResult, SaveResult
 from .naver_client import NaverNewsClient
 from .normalizer import API_SOURCE, ArticleNormalizer
@@ -26,11 +27,13 @@ class NewsIngestionService:
         normalizer: ArticleNormalizer,
         duplicate_checker: DuplicateChecker,
         repository: ArticleRepository,
+        enricher: ArticleEnricher | None = None,
     ) -> None:
         self._client = client
         self._normalizer = normalizer
         self._duplicate_checker = duplicate_checker
         self._repository = repository
+        self._enricher = enricher
 
     def ingest_keywords(self, keywords: tuple[str, ...]) -> IngestionStats:
         fetched = 0
@@ -135,6 +138,7 @@ class NewsIngestionService:
                 existing_article.cluster_id,
                 article.published_at,
             )
+            self._enrich_cluster_if_missing(existing_article.cluster_id, article)
         return True
 
     def _handle_cluster_duplicate(self, article: Article) -> bool:
@@ -146,9 +150,11 @@ class NewsIngestionService:
             article.published_at,
         )
         self._repository.save_duplicate_log(article, result)
+        self._enrich_cluster_if_missing(result.matched_cluster_id, article)
         return True
 
     def _insert_article_and_cluster(self, article: Article) -> SaveResult:
+        article = self._enrich_article(article)
         result = self._repository.save_article(article)
         if not result.inserted or result.article_id is None:
             return result
@@ -156,6 +162,23 @@ class NewsIngestionService:
         cluster_id = self._repository.create_cluster_from_article(result.article_id, article)
         self._repository.update_article_cluster_id(result.article_id, cluster_id)
         return result
+
+    def _enrich_article(self, article: Article) -> Article:
+        if self._enricher is None:
+            return article
+        return self._enricher.enrich(article)
+
+    def _enrich_cluster_if_missing(self, cluster_id: int, article: Article) -> None:
+        if self._enricher is None:
+            return
+        try:
+            if self._repository.cluster_has_enrichment(cluster_id):
+                return
+            enriched = self._enricher.enrich(article)
+            if enriched.summary is not None:
+                self._repository.update_cluster_enrichment(cluster_id, enriched)
+        except Exception:
+            logger.exception("Failed to backfill enrichment for cluster_id=%s", cluster_id)
 
 
 def _inserted(result: SaveResult) -> bool:
