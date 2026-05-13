@@ -496,13 +496,21 @@ def _candidate_cluster_from_row(row: dict) -> CandidateCluster:
         parties=row.get("parties"),
         regions=row.get("regions"),
         people=row.get("people"),
-        first_published_at=row.get("first_published_at"),
-        last_published_at=row.get("last_published_at"),
+        first_published_at=_as_utc_naive(row.get("first_published_at")),
+        last_published_at=_as_utc_naive(row.get("last_published_at")),
     )
 
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _as_utc_naive(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 def _is_integrity_error(exc: Exception) -> bool:

@@ -24,7 +24,7 @@ export function ElectionNewsPage() {
     people: [],
   });
 
-  const { articles, isLoading, hasMore, error, loadMore } = useInfiniteArticles({
+  const { articles, isLoading, hasMore, error, loadMore, retry } = useInfiniteArticles({
     query,
     ...filters,
   });
@@ -68,6 +68,7 @@ export function ElectionNewsPage() {
           hasMore={hasMore}
           error={error}
           onLoadMore={loadMore}
+          onRetry={retry}
           onAddFilter={addFilter}
         />
       </div>

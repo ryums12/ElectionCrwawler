@@ -10,10 +10,19 @@ type ArticleListProps = {
   hasMore: boolean;
   error: string | null;
   onLoadMore: () => void;
+  onRetry: () => void;
   onAddFilter: (type: FilterType, value: string) => void;
 };
 
-export function ArticleList({ articles, isLoading, hasMore, error, onLoadMore, onAddFilter }: ArticleListProps) {
+export function ArticleList({
+  articles,
+  isLoading,
+  hasMore,
+  error,
+  onLoadMore,
+  onRetry,
+  onAddFilter,
+}: ArticleListProps) {
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -25,7 +34,7 @@ export function ArticleList({ articles, isLoading, hasMore, error, onLoadMore, o
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0]?.isIntersecting && hasMore && !isLoading) {
+        if (entries[0]?.isIntersecting && hasMore && !isLoading && !error) {
           onLoadMore();
         }
       },
@@ -35,7 +44,7 @@ export function ArticleList({ articles, isLoading, hasMore, error, onLoadMore, o
     observer.observe(sentinel);
 
     return () => observer.disconnect();
-  }, [hasMore, isLoading, onLoadMore]);
+  }, [error, hasMore, isLoading, onLoadMore]);
 
   return (
     <section className="mt-8" aria-label="Article summaries">
@@ -52,7 +61,16 @@ export function ArticleList({ articles, isLoading, hasMore, error, onLoadMore, o
       ) : null}
 
       {error ? (
-        <div className="mt-4 rounded-lg border border-red-400/30 bg-red-950/40 p-4 text-sm text-red-100">{error}</div>
+        <div className="mt-4 rounded-lg border border-red-400/30 bg-red-950/40 p-4 text-sm text-red-100">
+          <p>{error}</p>
+          <button
+            type="button"
+            onClick={onRetry}
+            className="mt-3 rounded-md border border-red-300/40 px-3 py-1.5 text-xs font-medium text-red-50 transition hover:bg-red-400/10 focus:outline-none focus:ring-2 focus:ring-red-200"
+          >
+            Retry
+          </button>
+        </div>
       ) : null}
 
       <div ref={sentinelRef} className="h-12" aria-hidden="true" />

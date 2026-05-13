@@ -57,6 +57,9 @@ export async function GET(request: NextRequest) {
       user: getRequiredEnv("DB_USER"),
       password: getRequiredEnv("DB_PASSWORD"),
       ssl: getDbSslConfig(),
+      connectionTimeoutMillis: 8000,
+      idleTimeoutMillis: 1000,
+      max: 1,
     });
 
     try {
@@ -100,8 +103,8 @@ export async function GET(request: NextRequest) {
       await pool.end();
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to load news.";
-    return new NextResponse(message, { status: 500 });
+    logApiError(error);
+    return new NextResponse("News data is temporarily unavailable. Please try again later.", { status: 503 });
   }
 }
 
@@ -264,4 +267,14 @@ const getDbSslConfig = () => {
   }
 
   return { rejectUnauthorized: false };
+};
+
+const logApiError = (error: unknown) => {
+  if (!(error instanceof Error)) {
+    console.error("News API request failed.");
+    return;
+  }
+
+  const code = "code" in error ? String(error.code) : "unknown";
+  console.error(`News API request failed: ${error.name} (${code})`);
 };

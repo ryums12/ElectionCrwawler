@@ -57,6 +57,8 @@ export const useInfiniteArticles = ({ query, parties, regions, people }: UseInfi
       } catch (unknownError) {
         if (requestId === requestIdRef.current) {
           setError(unknownError instanceof Error ? unknownError.message : "Could not load articles.");
+          setHasMore(false);
+          hasMoreRef.current = false;
         }
       } finally {
         if (requestId === requestIdRef.current) {
@@ -80,11 +82,20 @@ export const useInfiniteArticles = ({ query, parties, regions, people }: UseInfi
     void loadPage(nextOffset);
   }, [loadPage, nextOffset]);
 
+  const retry = useCallback(() => {
+    setArticles([]);
+    setNextOffset(0);
+    setHasMore(true);
+    hasMoreRef.current = true;
+    void loadPage(0, true);
+  }, [loadPage]);
+
   return {
     articles,
     isLoading,
     hasMore,
     error,
     loadMore,
+    retry,
   };
 };
