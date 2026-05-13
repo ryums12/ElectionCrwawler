@@ -14,7 +14,7 @@ class DatabaseConfig:
     name: str
     user: str
     password: str
-    charset: str = "utf8mb4"
+    sslmode: str | None = None
 
 
 @dataclass(frozen=True)
@@ -61,11 +61,11 @@ def load_config() -> AppConfig:
     return AppConfig(
         database=DatabaseConfig(
             host=os.getenv("DB_HOST", "127.0.0.1"),
-            port=_int("DB_PORT", 3306),
+            port=_int("DB_PORT", 5432),
             name=_required("DB_NAME"),
             user=_required("DB_USER"),
             password=_required("DB_PASSWORD"),
-            charset=os.getenv("DB_CHARSET", "utf8mb4"),
+            sslmode=_sslmode_from_env(os.getenv("DB_SSL")),
         ),
         naver=NaverConfig(
             client_id=client_id,
@@ -107,6 +107,17 @@ def _bounded_int(name: str, default: int, minimum: int, maximum: int) -> int:
     if value < minimum or value > maximum:
         raise RuntimeError(f"{name} must be between {minimum} and {maximum}")
     return value
+
+
+def _sslmode_from_env(value: str | None) -> str | None:
+    if not value:
+        return None
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "require"}:
+        return "require"
+    if normalized in {"0", "false", "no", "disable"}:
+        return "disable"
+    return normalized
 
 
 def load_dotenv(path: str = ".env") -> None:

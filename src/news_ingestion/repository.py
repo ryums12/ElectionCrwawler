@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Iterator
+from typing import Any, Iterator
 
 from .config import DatabaseConfig
 from .models import (
@@ -25,18 +25,21 @@ class ArticleRepository:
 
     @contextmanager
     def _connect(self) -> Iterator[Connection]:
-        import pymysql
+        import psycopg
+        from psycopg.rows import dict_row
 
-        connection = pymysql.connect(
-            host=self._config.host,
-            port=self._config.port,
-            user=self._config.user,
-            password=self._config.password,
-            database=self._config.name,
-            charset=self._config.charset,
-            autocommit=False,
-            cursorclass=pymysql.cursors.DictCursor,
-        )
+        kwargs: dict[str, Any] = {
+            "host": self._config.host,
+            "port": self._config.port,
+            "user": self._config.user,
+            "password": self._config.password,
+            "dbname": self._config.name,
+            "row_factory": dict_row,
+        }
+        if self._config.sslmode:
+            kwargs["sslmode"] = self._config.sslmode
+
+        connection = psycopg.connect(**kwargs)
         try:
             yield connection
             connection.commit()
@@ -81,12 +84,12 @@ class ArticleRepository:
                 %(canonical_url)s,
                 %(updated_at)s
             )
-            ON DUPLICATE KEY UPDATE
-                last_seen_external_article_id = VALUES(last_seen_external_article_id),
-                last_seen_published_at = VALUES(last_seen_published_at),
-                last_seen_title = VALUES(last_seen_title),
-                last_seen_url = VALUES(last_seen_url),
-                updated_at = VALUES(updated_at)
+            ON CONFLICT (api_source, search_keyword) DO UPDATE SET
+                last_seen_external_article_id = EXCLUDED.last_seen_external_article_id,
+                last_seen_published_at = EXCLUDED.last_seen_published_at,
+                last_seen_title = EXCLUDED.last_seen_title,
+                last_seen_url = EXCLUDED.last_seen_url,
+                updated_at = EXCLUDED.updated_at
         """
         params = {
             **article.__dict__,
@@ -118,6 +121,7 @@ class ArticleRepository:
             ) VALUES (
                 %s, %s, %s, %s, %s, %s, %s, 0, 0, %s, %s
             )
+            RETURNING id
         """
         with self._connect() as connection:
             with connection.cursor() as cursor:
@@ -132,10 +136,11 @@ class ArticleRepository:
                         response.display,
                         len(response.items),
                         _utc_now(),
-                        json.dumps(response.raw_payload, ensure_ascii=False, sort_keys=True),
+                        _json_param(response.raw_payload),
                     ),
                 )
-                return int(cursor.lastrowid)
+                row = cursor.fetchone()
+                return int(row["id"])
 
     def update_fetch_log(
         self,
@@ -205,7 +210,7 @@ class ArticleRepository:
               AND (
                     %s IS NULL
                     OR last_published_at IS NULL
-                    OR last_published_at >= DATE_SUB(%s, INTERVAL %s HOUR)
+                    OR last_published_at >= (%s - (%s * INTERVAL '1 hour'))
                   )
             ORDER BY
                 CASE WHEN title_hash = %s THEN 0 ELSE 1 END,
@@ -282,12 +287,15 @@ class ArticleRepository:
                 %(content_hash)s,
                 %(cluster_id)s
             )
+            RETURNING id
         """
+        params = _article_params(article)
         try:
             with self._connect() as connection:
                 with connection.cursor() as cursor:
-                    cursor.execute(sql, article.__dict__)
-                    return SaveResult(inserted=True, article_id=int(cursor.lastrowid))
+                    cursor.execute(sql, params)
+                    row = cursor.fetchone()
+                    return SaveResult(inserted=True, article_id=int(row["id"]))
         except Exception as exc:
             if not _is_integrity_error(exc):
                 raise
@@ -317,6 +325,7 @@ class ArticleRepository:
             ) VALUES (
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1, 0, %s, %s
             )
+            RETURNING id
         """
         now = _utc_now()
         with self._connect() as connection:
@@ -332,17 +341,18 @@ class ArticleRepository:
                         article.normalized_description,
                         article.title_hash,
                         article.content_hash,
-                        article.main_keywords,
-                        article.parties,
-                        article.regions,
-                        article.people,
+                        _json_param(article.main_keywords),
+                        _json_param(article.parties),
+                        _json_param(article.regions),
+                        _json_param(article.people),
                         article.published_at,
                         article.published_at,
                         now,
                         now,
                     ),
                 )
-                return int(cursor.lastrowid)
+                row = cursor.fetchone()
+                return int(row["id"])
 
     def update_article_cluster_id(self, article_id: int, cluster_id: int) -> None:
         sql = "UPDATE articles SET cluster_id = %s, updated_at = %s WHERE id = %s"
@@ -420,10 +430,10 @@ class ArticleRepository:
                     sql,
                     (
                         article.summary,
-                        article.main_keywords,
-                        article.parties,
-                        article.regions,
-                        article.people,
+                        _json_param(article.main_keywords),
+                        _json_param(article.parties),
+                        _json_param(article.regions),
+                        _json_param(article.people),
                         _utc_now(),
                         cluster_id,
                     ),
@@ -467,7 +477,7 @@ class ArticleRepository:
                         article.published_at,
                         result.similarity_score,
                         result.duplicate_reason,
-                        article.raw_payload,
+                        _json_param(article.raw_payload),
                         _utc_now(),
                     ),
                 )
@@ -496,7 +506,7 @@ def _utc_now() -> datetime:
 
 
 def _is_integrity_error(exc: Exception) -> bool:
-    return exc.__class__.__name__ == "IntegrityError"
+    return exc.__class__.__name__ in {"IntegrityError", "UniqueViolation"}
 
 
 def _has_enrichment(row: dict) -> bool:
@@ -507,3 +517,26 @@ def _has_enrichment(row: dict) -> bool:
         and row.get("regions") is not None
         and row.get("people") is not None
     )
+
+
+def _article_params(article: Article) -> dict[str, Any]:
+    params = article.__dict__.copy()
+    for key in ("raw_payload", "main_keywords", "parties", "regions", "people"):
+        params[key] = _json_param(params[key])
+    return params
+
+
+def _json_param(value: Any) -> Any:
+    if value is None:
+        return None
+
+    from psycopg.types.json import Jsonb
+
+    if isinstance(value, (dict, list)):
+        return Jsonb(value)
+    if isinstance(value, str):
+        try:
+            return Jsonb(json.loads(value))
+        except json.JSONDecodeError:
+            return Jsonb(value)
+    return Jsonb(value)

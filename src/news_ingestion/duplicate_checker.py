@@ -107,12 +107,14 @@ def _jaccard_similarity(left: set[str], right: set[str]) -> float:
     return len(left & right) / len(left | right)
 
 
-def _keyword_set(value: str | None) -> set[str]:
+def _keyword_set(value) -> set[str]:
     if not value:
         return set()
+    if isinstance(value, list):
+        return {str(item).strip().casefold() for item in value if str(item).strip()}
     try:
         parsed = json.loads(value)
-    except json.JSONDecodeError:
+    except (TypeError, json.JSONDecodeError):
         return {token.strip().casefold() for token in value.split(",") if token.strip()}
     if isinstance(parsed, list):
         return {str(item).strip().casefold() for item in parsed if str(item).strip()}

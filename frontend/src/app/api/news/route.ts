@@ -1,7 +1,7 @@
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 import { loadEnvConfig } from "@next/env";
-import mysql from "mysql2/promise";
+import { Pool } from "pg";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -18,10 +18,10 @@ type NewsRow = {
   original_url: string | null;
   naver_url: string | null;
   canonical_url: string | null;
-  parties: string | null;
-  regions: string | null;
-  people: string | null;
-  main_keywords: string | null;
+  parties: unknown;
+  regions: unknown;
+  people: unknown;
+  main_keywords: unknown;
 };
 
 const MAX_LIMIT = 50;
@@ -50,19 +50,18 @@ export async function GET(request: NextRequest) {
     const limit = parseBoundedInt(searchParams.get("limit"), DEFAULT_LIMIT, 1, MAX_LIMIT);
     const offset = parseBoundedInt(searchParams.get("offset"), 0, 0, Number.MAX_SAFE_INTEGER);
 
-    const connection = await mysql.createConnection({
+    const pool = new Pool({
       host: process.env.DB_HOST || "127.0.0.1",
-      port: parseBoundedInt(process.env.DB_PORT, 3306, 1, 65535),
+      port: parseBoundedInt(process.env.DB_PORT, 5432, 1, 65535),
       database: getRequiredEnv("DB_NAME"),
       user: getRequiredEnv("DB_USER"),
       password: getRequiredEnv("DB_PASSWORD"),
-      charset: process.env.DB_CHARSET || "utf8mb4",
-      timezone: "Z",
+      ssl: getDbSslConfig(),
     });
 
     try {
       const { whereSql, values } = buildWhereClause({ q, parties, regions, people });
-      const [rows] = await connection.execute<mysql.RowDataPacket[]>(
+      const result = await pool.query<NewsRow>(
         `
           SELECT
             id,
@@ -83,12 +82,12 @@ export async function GET(request: NextRequest) {
           FROM articles
           ${whereSql}
           ORDER BY COALESCE(published_at, created_at, fetched_at) DESC, id DESC
-          LIMIT ? OFFSET ?
+          LIMIT $${values.length + 1} OFFSET $${values.length + 2}
         `,
         [...values, limit + 1, offset],
       );
 
-      const newsRows = rows as NewsRow[];
+      const newsRows = result.rows;
       const visibleRows = newsRows.slice(0, limit);
       const items = visibleRows.map(normalizeRow);
 
@@ -98,7 +97,7 @@ export async function GET(request: NextRequest) {
         hasMore: newsRows.length > limit,
       });
     } finally {
-      await connection.end();
+      await pool.end();
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to load news.";
@@ -121,8 +120,11 @@ const buildWhereClause = ({
   const values: Array<string | number> = [];
 
   if (q) {
-    clauses.push(`(${SEARCH_COLUMNS.map((column) => `${column} LIKE ?`).join(" OR ")})`);
-    values.push(...SEARCH_COLUMNS.map(() => `%${q}%`));
+    const searchClauses = SEARCH_COLUMNS.map((column) => {
+      values.push(`%${q}%`);
+      return `${jsonSearchExpression(column)} ILIKE $${values.length}`;
+    });
+    clauses.push(`(${searchClauses.join(" OR ")})`);
   }
 
   addTextFilter(clauses, values, "parties", parties);
@@ -145,8 +147,11 @@ const addTextFilter = (
     return;
   }
 
-  clauses.push(`(${selectedValues.map(() => `${column} LIKE ?`).join(" OR ")})`);
-  values.push(...selectedValues.map((value) => `%${value}%`));
+  const filterClauses = selectedValues.map((value) => {
+    values.push(`%${value}%`);
+    return `${column}::text ILIKE $${values.length}`;
+  });
+  clauses.push(`(${filterClauses.join(" OR ")})`);
 };
 
 const normalizeRow = (row: NewsRow) => {
@@ -170,12 +175,16 @@ const normalizeRow = (row: NewsRow) => {
   };
 };
 
-const splitList = (value: string | null) => {
+const splitList = (value: unknown) => {
   if (!value) {
     return [];
   }
 
-  const trimmed = value.trim();
+  if (Array.isArray(value)) {
+    return value.map(String).map((item) => item.trim()).filter(Boolean);
+  }
+
+  const trimmed = String(value).trim();
   if (!trimmed) {
     return [];
   }
@@ -238,4 +247,21 @@ const getRequiredEnv = (name: string) => {
 
 const loadRootEnv = () => {
   loadEnvConfig(path.resolve(process.cwd(), ".."));
+};
+
+const jsonSearchExpression = (column: string) => {
+  if (["main_keywords", "parties", "regions", "people"].includes(column)) {
+    return `${column}::text`;
+  }
+
+  return `COALESCE(${column}, '')`;
+};
+
+const getDbSslConfig = () => {
+  const value = process.env.DB_SSL?.trim().toLowerCase();
+  if (!value || ["0", "false", "no", "disable"].includes(value)) {
+    return false;
+  }
+
+  return { rejectUnauthorized: false };
 };
