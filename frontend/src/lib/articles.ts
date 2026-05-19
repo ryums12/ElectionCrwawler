@@ -20,13 +20,12 @@ export type ArticleSearchParams = {
   parties: string[];
   regions: string[];
   people: string[];
-  offset: number;
+  page: number;
   limit: number;
 };
 
 export type ArticleSearchResult = {
   items: Article[];
-  nextOffset: number;
   hasMore: boolean;
 };
 
@@ -39,7 +38,7 @@ export const fetchArticles = async (params: ArticleSearchParams): Promise<Articl
   }
 
   searchParams.set("limit", String(params.limit));
-  searchParams.set("offset", String(params.offset));
+  searchParams.set("page", String(params.page));
   params.parties.forEach((party) => searchParams.append("party", party));
   params.regions.forEach((region) => searchParams.append("region", region));
   params.people.forEach((person) => searchParams.append("person", person));

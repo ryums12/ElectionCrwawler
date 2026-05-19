@@ -9,7 +9,7 @@ type UseInfiniteArticlesParams = Pick<ArticleSearchParams, "query" | "parties" |
 
 export const useInfiniteArticles = ({ query, parties, regions, people }: UseInfiniteArticlesParams) => {
   const [articles, setArticles] = useState<Article[]>([]);
-  const [nextOffset, setNextOffset] = useState(0);
+  const [nextPage, setNextPage] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -28,7 +28,7 @@ export const useInfiniteArticles = ({ query, parties, regions, people }: UseInfi
   );
 
   const loadPage = useCallback(
-    async (offset: number, shouldReset = false) => {
+    async (page: number, shouldReset = false) => {
       if ((isLoadingRef.current && !shouldReset) || (!hasMoreRef.current && !shouldReset)) {
         return;
       }
@@ -42,7 +42,7 @@ export const useInfiniteArticles = ({ query, parties, regions, people }: UseInfi
       try {
         const result = await fetchArticles({
           ...params,
-          offset,
+          page,
           limit: PAGE_SIZE,
         });
 
@@ -51,7 +51,7 @@ export const useInfiniteArticles = ({ query, parties, regions, people }: UseInfi
         }
 
         setArticles((currentArticles) => (shouldReset ? result.items : [...currentArticles, ...result.items]));
-        setNextOffset(result.nextOffset);
+        setNextPage(page + 1);
         setHasMore(result.hasMore);
         hasMoreRef.current = result.hasMore;
       } catch (unknownError) {
@@ -72,22 +72,22 @@ export const useInfiniteArticles = ({ query, parties, regions, people }: UseInfi
 
   useEffect(() => {
     setArticles([]);
-    setNextOffset(0);
+    setNextPage(1);
     setHasMore(true);
     hasMoreRef.current = true;
-    void loadPage(0, true);
+    void loadPage(1, true);
   }, [loadPage]);
 
   const loadMore = useCallback(() => {
-    void loadPage(nextOffset);
-  }, [loadPage, nextOffset]);
+    void loadPage(nextPage);
+  }, [loadPage, nextPage]);
 
   const retry = useCallback(() => {
     setArticles([]);
-    setNextOffset(0);
+    setNextPage(1);
     setHasMore(true);
     hasMoreRef.current = true;
-    void loadPage(0, true);
+    void loadPage(1, true);
   }, [loadPage]);
 
   return {

@@ -48,7 +48,10 @@ export async function GET(request: NextRequest) {
     const regions = getAllParams(searchParams, "region", "regions");
     const people = getAllParams(searchParams, "person", "people");
     const limit = parseBoundedInt(searchParams.get("limit"), DEFAULT_LIMIT, 1, MAX_LIMIT);
-    const offset = parseBoundedInt(searchParams.get("offset"), 0, 0, Number.MAX_SAFE_INTEGER);
+    const page = parseBoundedInt(searchParams.get("page"), 1, 1, Number.MAX_SAFE_INTEGER);
+    const offset = searchParams.has("offset")
+      ? parseBoundedInt(searchParams.get("offset"), 0, 0, Number.MAX_SAFE_INTEGER)
+      : (page - 1) * limit;
 
     const pool = new Pool({
       host: process.env.DB_HOST || "127.0.0.1",

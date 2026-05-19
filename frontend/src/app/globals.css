@@ -3,6 +3,10 @@
 @tailwind utilities;
 
 :root {
+  color-scheme: light;
+}
+
+:root.dark {
   color-scheme: dark;
 }
 
@@ -11,12 +15,21 @@
 }
 
 html {
-  background: #080914;
+  background: #f8fafc;
 }
 
 body {
   min-height: 100vh;
   margin: 0;
+  background: linear-gradient(135deg, #f8fafc 0%, #eef4ff 50%, #f8fafc 100%);
+  color: #0f172a;
+}
+
+html.dark {
+  background: #080914;
+}
+
+html.dark body {
   background:
     radial-gradient(circle at top left, rgba(99, 102, 241, 0.18), transparent 34rem),
     linear-gradient(135deg, #080914 0%, #121426 50%, #0b1020 100%);

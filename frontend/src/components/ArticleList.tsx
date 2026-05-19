@@ -55,18 +55,18 @@ export function ArticleList({
       </div>
 
       {!isLoading && articles.length === 0 && !error ? (
-        <div className="rounded-lg border border-line bg-panel/70 p-8 text-center text-slate-300">
+        <div className="rounded-lg border border-slate-200 bg-white/80 p-8 text-center text-slate-600 dark:border-line dark:bg-panel/70 dark:text-slate-300">
           No articles match the current search.
         </div>
       ) : null}
 
       {error ? (
-        <div className="mt-4 rounded-lg border border-red-400/30 bg-red-950/40 p-4 text-sm text-red-100">
+        <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-400/30 dark:bg-red-950/40 dark:text-red-100">
           <p>{error}</p>
           <button
             type="button"
             onClick={onRetry}
-            className="mt-3 rounded-md border border-red-300/40 px-3 py-1.5 text-xs font-medium text-red-50 transition hover:bg-red-400/10 focus:outline-none focus:ring-2 focus:ring-red-200"
+            className="mt-3 rounded-md border border-red-300 px-3 py-1.5 text-xs font-medium text-red-700 transition hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-200 dark:border-red-300/40 dark:text-red-50 dark:hover:bg-red-400/10"
           >
             Retry
           </button>
@@ -75,10 +75,12 @@ export function ArticleList({
 
       <div ref={sentinelRef} className="h-12" aria-hidden="true" />
 
-      {isLoading ? <p className="py-4 text-center text-sm text-slate-400">Loading articles...</p> : null}
+      {isLoading ? (
+        <p className="py-4 text-center text-sm text-slate-500 dark:text-slate-400">Loading articles...</p>
+      ) : null}
 
       {!hasMore && articles.length > 0 ? (
-        <p className="py-4 text-center text-sm text-slate-500">No more articles to load.</p>
+        <p className="py-4 text-center text-sm text-slate-500 dark:text-slate-400">No more articles to load.</p>
       ) : null}
     </section>
   );
