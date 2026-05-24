@@ -60,8 +60,8 @@ def load_config() -> AppConfig:
 
     return AppConfig(
         database=DatabaseConfig(
-            host=os.getenv("DB_HOST", "127.0.0.1"),
-            port=_int("DB_PORT", 5432),
+            host=_required("DB_HOST"),
+            port=_bounded_int("DB_PORT", default=6543, minimum=1, maximum=65535),
             name=_required("DB_NAME"),
             user=_required("DB_USER"),
             password=_required("DB_PASSWORD"),
@@ -88,7 +88,10 @@ def load_config() -> AppConfig:
 def _required(name: str) -> str:
     value = os.getenv(name)
     if not value:
-        raise RuntimeError(f"Missing required environment variable: {name}")
+        raise RuntimeError(
+            f"Missing required database/API environment variable: {name}. "
+            "Database settings must be configured explicitly; the app no longer falls back to localhost."
+        )
     return value
 
 
@@ -111,7 +114,7 @@ def _bounded_int(name: str, default: int, minimum: int, maximum: int) -> int:
 
 def _sslmode_from_env(value: str | None) -> str | None:
     if not value:
-        return None
+        return "require"
     normalized = value.strip().lower()
     if normalized in {"1", "true", "yes", "require"}:
         return "require"

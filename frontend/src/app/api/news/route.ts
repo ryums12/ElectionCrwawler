@@ -54,8 +54,8 @@ export async function GET(request: NextRequest) {
       : (page - 1) * limit;
 
     const pool = new Pool({
-      host: process.env.DB_HOST || "127.0.0.1",
-      port: parseBoundedInt(process.env.DB_PORT, 5432, 1, 65535),
+      host: getRequiredEnv("DB_HOST"),
+      port: parseBoundedInt(process.env.DB_PORT, 6543, 1, 65535),
       database: getRequiredEnv("DB_NAME"),
       user: getRequiredEnv("DB_USER"),
       password: getRequiredEnv("DB_PASSWORD"),
@@ -245,7 +245,10 @@ const toIsoString = (value: Date | string | null) => {
 const getRequiredEnv = (name: string) => {
   const value = process.env[name];
   if (!value) {
-    throw new Error(`Missing required environment variable: ${name}`);
+    throw new Error(
+      `Missing required database environment variable: ${name}. ` +
+        "Database settings must be configured explicitly; the app no longer falls back to localhost.",
+    );
   }
 
   return value;
@@ -265,7 +268,7 @@ const jsonSearchExpression = (column: string) => {
 
 const getDbSslConfig = () => {
   const value = process.env.DB_SSL?.trim().toLowerCase();
-  if (!value || ["0", "false", "no", "disable"].includes(value)) {
+  if (value && ["0", "false", "no", "disable"].includes(value)) {
     return false;
   }
 
