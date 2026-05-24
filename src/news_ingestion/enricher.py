@@ -12,7 +12,7 @@ from urllib.request import Request, urlopen
 from .config import EnrichmentConfig
 from .models import Article
 from .normalizer import clean_html_text
-from .region_aliases import merge_regions, normalize_regions_from_text
+from .metadata_aliases import merge_regions, normalize_party_values, normalize_regions_from_text
 
 logger = logging.getLogger(__name__)
 
@@ -71,12 +71,13 @@ class ArticleEnricher:
             )
         )
         regions = merge_regions(result.regions, alias_regions)
+        parties = normalize_party_values(result.parties)
 
         return replace(
             article,
             summary=result.summary,
             main_keywords=_json_array(result.main_keywords),
-            parties=_json_array(result.parties),
+            parties=_json_array(parties),
             people=_json_array(result.people),
             regions=_json_array(regions),
         )

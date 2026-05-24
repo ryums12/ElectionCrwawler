@@ -38,6 +38,11 @@ GROUP_ALIASES = {
     "TK": ("TK", "대구", "경북"),
 }
 
+PARTY_ALIASES = {
+    "민주당": "더불어민주당",
+    "더불어민주당": "더불어민주당",
+}
+
 UNIVERSITY_FALSE_POSITIVE_RE = re.compile(
     r"(경북대(?:학교)?|경남대(?:학교)?|전북대(?:학교)?|전남대(?:학교)?|충북대(?:학교)?|충남대(?:학교)?)"
 )
@@ -100,11 +105,41 @@ def normalize_region_values(values: Iterable[str] | None) -> list[str]:
     return _dedupe(regions)
 
 
+def normalize_party_values(values: Iterable[str] | None) -> list[str]:
+    if values is None:
+        return []
+
+    parties: list[str] = []
+    for raw_value in values:
+        value = str(raw_value).strip()
+        if not value:
+            continue
+        normalized = PARTY_ALIASES.get(_party_alias_key(value), value)
+        parties.append(normalized)
+    return merge_unique_values(parties)
+
+
+def merge_unique_values(*value_lists: Iterable[str] | None) -> list[str]:
+    merged: list[str] = []
+    for value_list in value_lists:
+        if value_list is None:
+            continue
+        for raw_value in value_list:
+            value = str(raw_value).strip()
+            if value:
+                merged.append(value)
+    return _dedupe(merged)
+
+
 def merge_regions(*region_lists: Iterable[str] | None) -> list[str]:
     merged: list[str] = []
     for region_list in region_lists:
         merged.extend(normalize_region_values(region_list))
-    return _dedupe(merged)
+    return merge_unique_values(merged)
+
+
+def _party_alias_key(value: str) -> str:
+    return re.sub(r"\s+", "", value)
 
 
 def _dedupe(values: Iterable[str]) -> list[str]:

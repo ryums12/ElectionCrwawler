@@ -7,14 +7,30 @@ from datetime import datetime
 from src.news_ingestion.config import EnrichmentConfig
 from src.news_ingestion.enricher import ArticleEnricher
 from src.news_ingestion.models import Article
-from src.news_ingestion.region_aliases import (
+from src.news_ingestion.metadata_aliases import (
     merge_regions,
+    normalize_party_values,
     normalize_region_values,
     normalize_regions_from_text,
 )
 
 
-class RegionAliasTests(unittest.TestCase):
+class MetadataAliasTests(unittest.TestCase):
+    def test_party_aliases_normalize_single_democratic_party_alias(self) -> None:
+        self.assertEqual(normalize_party_values(["민주당"]), ["더불어민주당"])
+
+    def test_party_aliases_keep_canonical_democratic_party_name(self) -> None:
+        self.assertEqual(normalize_party_values(["더불어민주당"]), ["더불어민주당"])
+
+    def test_party_aliases_deduplicate_after_normalization(self) -> None:
+        self.assertEqual(normalize_party_values(["민주당", "더불어민주당"]), ["더불어민주당"])
+
+    def test_party_aliases_preserve_stable_order_for_unrelated_names(self) -> None:
+        self.assertEqual(normalize_party_values(["국민의힘", "민주당"]), ["국민의힘", "더불어민주당"])
+
+    def test_party_aliases_ignore_whitespace_for_alias_lookup(self) -> None:
+        self.assertEqual(normalize_party_values(["더불어 민주당", " 민주당 "]), ["더불어민주당"])
+
     def test_direct_province_aliases_use_short_name(self) -> None:
         self.assertEqual(
             normalize_regions_from_text("경상북도 포항에서 지방선거 관련 기자회견이 열렸다."),
@@ -65,7 +81,33 @@ class RegionAliasTests(unittest.TestCase):
         self.assertEqual(normalize_region_values(["중구", "경북대", "경남대학교", "서울시"]), ["서울"])
 
 
-class EnricherRegionAliasTests(unittest.TestCase):
+class EnricherMetadataAliasTests(unittest.TestCase):
+    def test_enricher_normalizes_party_aliases_before_save(self) -> None:
+        client = FakeOpenAIClient(
+            {
+                "summary": "정당 공천 결과가 발표됐다.",
+                "main_keywords": [],
+                "parties": ["국민의힘", "민주당", "더불어 민주당"],
+                "people": [],
+                "regions": [],
+            }
+        )
+        enricher = ArticleEnricher(
+            EnrichmentConfig(
+                openai_api_key="test-key",
+                openai_model="test-model",
+                request_timeout_seconds=1,
+                article_fetch_timeout_seconds=1,
+                max_article_chars=2000,
+            ),
+            body_fetcher=lambda _url: "정당 공천 결과가 발표됐고 국민의힘과 민주당이 입장을 냈다.",
+            llm_client=client,
+        )
+
+        enriched = enricher.enrich(_article())
+
+        self.assertEqual(json.loads(enriched.parties or "[]"), ["국민의힘", "더불어민주당"])
+
     def test_enricher_merges_llm_regions_with_alias_regions_before_save(self) -> None:
         client = FakeOpenAIClient(
             {
